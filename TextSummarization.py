@@ -1,3 +1,8 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
 import pandas as pd
 import numpy as np
 import tensorflow as tf
@@ -7,23 +12,21 @@ import time
 from tensorflow.python.layers.core import Dense
 from tensorflow.python.ops.rnn_cell_impl import _zero_state_tensors
 
-reviews = pd.read_csv("Reviews.csv")
+import itertools
 
-reviews.shape
+print('TensorFlow Version: {}'.format(tf.__version__))
 
+reviews = pd.read_csv("./input/Reviews.csv")
 reviews.head()
-
 reviews.isnull().sum()
-
 reviews = reviews.dropna()
 reviews = reviews.drop(['Id', 'ProductId', 'UserId', 'ProfileName', 'HelpfulnessNumerator', 'HelpfulnessDenominator',
                         'Score', 'Time'], 1)
+
 reviews = reviews.reset_index(drop=True)
-
 reviews.head()
-
 for i in range(5):
-    print("Review #",i+1)
+    print("Review #", i + 1)
     print(reviews.Summary[i])
     print(reviews.Text[i])
     print()
@@ -134,9 +137,18 @@ def clean_text(text, remove_stopwords=True):
 clean_summaries = []
 for summary in reviews.Summary:
     clean_summaries.append(clean_text(summary, remove_stopwords=False))
+print("Summaries are complete.")
+
 clean_texts = []
 for text in reviews.Text:
     clean_texts.append(clean_text(text))
+print("Texts are complete.")
+
+for i in range(5):
+    print("Clean Review #", i + 1)
+    print(clean_summaries[i])
+    print(clean_texts[i])
+    print()
 
 
 def count_words(count_dict, text):
@@ -151,33 +163,50 @@ def count_words(count_dict, text):
 word_counts = {}
 count_words(word_counts, clean_summaries)
 count_words(word_counts, clean_texts)
+
+print("Size of Vocabulary:", len(word_counts))
+
 embeddings_index = {}
-with open('numberbatch-en.txt', encoding='utf-8') as f:
+with open('./input/numberbatch-en.txt', encoding='utf-8') as f:
     for line in f:
         values = line.split(' ')
         word = values[0]
         embedding = np.asarray(values[1:], dtype='float32')
         embeddings_index[word] = embedding
+
 missing_words = 0
 threshold = 20
+
 for word, count in word_counts.items():
     if count > threshold:
         if word not in embeddings_index:
             missing_words += 1
+
 missing_ratio = round(missing_words / len(word_counts), 4) * 100
+
+print("Number of words missing from CN:", missing_words)
+print("Percent of words that are missing from vocabulary: {}%".format(missing_ratio))
+
 vocab_to_int = {}
 value = 0
 for word, count in word_counts.items():
     if count >= threshold or word in embeddings_index:
         vocab_to_int[word] = value
         value += 1
+
 codes = ["<UNK>", "<PAD>", "<EOS>", "<GO>"]
 for code in codes:
     vocab_to_int[code] = len(vocab_to_int)
+
 int_to_vocab = {}
 for word, value in vocab_to_int.items():
     int_to_vocab[value] = word
 usage_ratio = round(len(vocab_to_int) / len(word_counts), 4) * 100
+
+print("Total number of unique words:", len(word_counts))
+print("Number of words we will use:", len(vocab_to_int))
+print("Percent of words we will use: {}%".format(usage_ratio))
+
 embedding_dim = 300
 nb_words = len(vocab_to_int)
 word_embedding_matrix = np.zeros((nb_words, embedding_dim), dtype=np.float32)
@@ -188,6 +217,8 @@ for word, i in vocab_to_int.items():
         new_embedding = np.array(np.random.uniform(-1.0, 1.0, embedding_dim))
         embeddings_index[word] = new_embedding
         word_embedding_matrix[i] = new_embedding
+
+print('Size word embedding matrix: ', len(word_embedding_matrix))
 
 
 def convert_to_ints(text, word_count, unk_count, eos=False):
@@ -209,9 +240,14 @@ def convert_to_ints(text, word_count, unk_count, eos=False):
 
 word_count = 0
 unk_count = 0
+
 int_summaries, word_count, unk_count = convert_to_ints(clean_summaries, word_count, unk_count)
 int_texts, word_count, unk_count = convert_to_ints(clean_texts, word_count, unk_count, eos=True)
 unk_percent = round(unk_count / word_count, 4) * 100
+
+print("Total number of words in headlines:", word_count)
+print("Total number of UNKs in headlines:", unk_count)
+print("Percent of words that are UNK: {}%".format(unk_percent))
 
 
 def create_lengths(text):
@@ -223,13 +259,20 @@ def create_lengths(text):
 
 lengths_summaries = create_lengths(int_summaries)
 lengths_texts = create_lengths(int_texts)
-print(np.percentile(lengths_texts.counts, 90))
-print(np.percentile(lengths_texts.counts, 95))
-print(np.percentile(lengths_texts.counts, 99))
-print(np.percentile(lengths_summaries.counts, 90))
-print(np.percentile(lengths_summaries.counts, 95))
-print(np.percentile(lengths_summaries.counts, 99))
 
+print("Summaries:")
+print(lengths_summaries.describe())
+print()
+print("Texts:")
+print(lengths_texts.describe())
+
+
+# print(np.percentile(lengths_texts.counts, 90))
+# print(np.percentile(lengths_texts.counts, 95))
+# print(np.percentile(lengths_texts.counts, 99))
+# print(np.percentile(lengths_summaries.counts, 90))
+# print(np.percentile(lengths_summaries.counts, 95))
+# print(np.percentile(lengths_summaries.counts, 99))
 
 def unk_counter(sentence):
     unk_count = 0
@@ -247,6 +290,11 @@ min_length = 2
 unk_text_limit = 1
 unk_summary_limit = 0
 
+sorted_summaries_text = []
+sorted_texts_text = []
+
+# beam_width = 10
+
 for length in range(min(lengths_texts.counts), max_text_length):
     for count, words in enumerate(int_summaries):
         if (len(int_summaries[count]) >= min_length and
@@ -258,7 +306,12 @@ for length in range(min(lengths_texts.counts), max_text_length):
         ):
             sorted_summaries.append(int_summaries[count])
             sorted_texts.append(int_texts[count])
+            sorted_summaries_text.append(clean_summaries[count])
+            sorted_texts_text.append(clean_texts[count])
 
+
+# print(len(sorted_summaries))
+# print(len(sorted_texts))
 
 def model_inputs():
     input_data = tf.placeholder(tf.int32, [None, None], name='input')
@@ -333,6 +386,15 @@ def inference_decoding_layer(embeddings, start_token, end_token, dec_cell, initi
                                                         initial_state,
                                                         output_layer)
 
+    # inference_decoder = tf.contrib.seq2seq.BeamSearchDecoder(cell = dec_cell,
+    #                                                        embedding = embeddings,
+    #                                                       start_tokens = start_tokens,
+    #                                                      end_token = end_token,
+    #                                                     initial_state = initial_state,
+    #                                                    beam_width = beam_width,
+    #                                                   output_layer = output_layer,
+    #                                                  length_penalty_weight = 0.0)
+
     inference_logits, _, _ = tf.contrib.seq2seq.dynamic_decode(inference_decoder,
                                                                output_time_major=False,
                                                                impute_finished=True,
@@ -343,8 +405,6 @@ def inference_decoding_layer(embeddings, start_token, end_token, dec_cell, initi
 
 def decoding_layer(dec_embed_input, embeddings, enc_output, enc_state, vocab_size, text_length, summary_length,
                    max_summary_length, rnn_size, vocab_to_int, keep_prob, batch_size, num_layers):
-    '''Create the decoding cell and attention for the training and inference decoding layers'''
-
     for layer in range(num_layers):
         with tf.variable_scope('decoder_{}'.format(layer)):
             lstm = tf.contrib.rnn.LSTMCell(rnn_size,
@@ -376,6 +436,7 @@ def decoding_layer(dec_embed_input, embeddings, enc_output, enc_state, vocab_siz
                                                   vocab_size,
                                                   max_summary_length)
     with tf.variable_scope("decode", reuse=True):
+        # initial_state = tf.contrib.seq2seq.tile_batch(enc_state[0], multiplier=beam_width)
         inference_logits = inference_decoding_layer(embeddings,
                                                     vocab_to_int['<GO>'],
                                                     vocab_to_int['<EOS>'],
@@ -477,8 +538,8 @@ with train_graph.as_default():
         capped_gradients = [(tf.clip_by_value(grad, -5., 5.), var) for grad, var in gradients if grad is not None]
         train_op = optimizer.apply_gradients(capped_gradients)
 
-start = 200000
-end = start + 50000
+start = 0
+end = (len(sorted_summaries) // 10) * 7
 sorted_summaries_short = sorted_summaries[start:end]
 sorted_texts_short = sorted_texts[start:end]
 print("The shortest text length:", len(sorted_texts_short[0]))
@@ -496,8 +557,9 @@ update_loss = 0
 batch_loss = 0
 summary_update_loss = []
 
-# Doan nay dang loi=> sua duong dan model (checkpoint)
-checkpoint = "best_model.ckpt"
+# C:\Users\khanh-bk\AppData\Local\Programs\Python\Python36
+
+checkpoint = "D:/Source/PycharmProjects/best_model.ckpt"
 with tf.Session(graph=train_graph) as sess:
     sess.run(tf.global_variables_initializer())
 
@@ -560,3 +622,295 @@ with tf.Session(graph=train_graph) as sess:
         if stop_early == stop:
             print("Stopping Training.")
             break
+
+
+def text_to_seq(text):
+    text = clean_text(text)
+    return [vocab_to_int.get(word, vocab_to_int['<UNK>']) for word in text.split()]
+
+
+# random = np.random.randint(0,len(clean_texts))
+
+start = (len(sorted_summaries) // 10) * 7
+end = len(sorted_summaries)
+sorted_summaries_short = sorted_summaries_text[start:end]
+sorted_texts_short = sorted_texts_text[start:end]
+output_predict = []
+
+# input_sentence = clean_texts[random]
+# text = text_to_seq(clean_texts[random])
+
+pad = vocab_to_int["<PAD>"]
+count = 0
+loaded_graph = tf.Graph()
+with tf.Session(graph=loaded_graph) as sess:
+    loader = tf.train.import_meta_graph(checkpoint + '.meta')
+    loader.restore(sess, checkpoint)
+
+    input_data = loaded_graph.get_tensor_by_name('input:0')
+    logits = loaded_graph.get_tensor_by_name('predictions:0')
+    text_length = loaded_graph.get_tensor_by_name('text_length:0')
+    summary_length = loaded_graph.get_tensor_by_name('summary_length:0')
+    keep_prob = loaded_graph.get_tensor_by_name('keep_prob:0')
+
+    for input_sentence in sorted_texts_short:
+        count += 1
+        text = text_to_seq(input_sentence)
+        answer_logits = sess.run(logits, {input_data: [text] * batch_size,
+                                          summary_length: [np.random.randint(5, 8)],
+                                          text_length: [len(text)] * batch_size,
+                                          keep_prob: 1.0})[0]
+
+        output_predict.append(" ".join([int_to_vocab[i] for i in answer_logits if i != pad]))
+        if (count // (len(sorted_texts_short) // 100) % 10 == 0):
+            print('The data of test set was run through {}%'.format(count // (len(sorted_texts_short) // 100)))
+
+            # pad = vocab_to_int["<PAD>"]
+
+            # print('Original Text:', input_sentence)
+            # print('\nText')
+            # print('  Word Ids:    {}'.format([i for i in text]))
+            # print('  Input Words: {}'.format(" ".join([int_to_vocab[i] for i in text])))
+
+            # print('\nSummary')
+            # print('  Word Ids:       {}'.format([i for i in answer_logits if i != pad]))
+            # print('  Response Words: {}'.format(" ".join([int_to_vocab[i] for i in answer_logits if i != pad])))
+
+
+def _get_ngrams(n, text):
+    ngram_set = set()
+    text_length = len(text)
+    max_index_ngram_start = text_length - n
+    for i in range(max_index_ngram_start + 1):
+        ngram_set.add(tuple(text[i:i + n]))
+    return ngram_set
+
+
+def _split_into_words(sentences):
+    return list(itertools.chain(*[_.split(" ") for _ in sentences]))
+
+
+def _get_word_ngrams(n, sentences):
+    assert len(sentences) > 0
+    assert n > 0
+
+    words = _split_into_words(sentences)
+    return _get_ngrams(n, words)
+
+
+def _lcs(x, y):
+    n, m = len(x), len(y)
+    table = dict()
+    for i in range(n + 1):
+        for j in range(m + 1):
+            if i == 0 or j == 0:
+                table[i, j] = 0
+            elif x[i - 1] == y[j - 1]:
+                table[i, j] = table[i - 1, j - 1] + 1
+            else:
+                table[i, j] = max(table[i - 1, j], table[i, j - 1])
+    return table
+
+
+def _len_lcs(x, y):
+    table = _lcs(x, y)
+    n, m = len(x), len(y)
+    return table[n, m]
+
+
+def _recon_lcs(x, y):
+    i, j = len(x), len(y)
+    table = _lcs(x, y)
+
+    def _recon(i, j):
+
+        if i == 0 or j == 0:
+            return []
+        elif x[i - 1] == y[j - 1]:
+            return _recon(i - 1, j - 1) + [(x[i - 1], i)]
+        elif table[i - 1, j] > table[i, j - 1]:
+            return _recon(i - 1, j)
+        else:
+            return _recon(i, j - 1)
+
+    recon_tuple = tuple(map(lambda x: x[0], _recon(i, j)))
+    return recon_tuple
+
+
+def rouge_n(evaluated_sentences, reference_sentences, n=2):
+    if len(evaluated_sentences) <= 0 or len(reference_sentences) <= 0:
+        raise ValueError("Collections must contain at least 1 sentence.")
+
+    evaluated_ngrams = _get_word_ngrams(n, evaluated_sentences)
+    reference_ngrams = _get_word_ngrams(n, reference_sentences)
+    reference_count = len(reference_ngrams)
+    evaluated_count = len(evaluated_ngrams)
+
+    overlapping_ngrams = evaluated_ngrams.intersection(reference_ngrams)
+    overlapping_count = len(overlapping_ngrams)
+
+    if evaluated_count == 0:
+        precision = 0.0
+    else:
+        precision = overlapping_count / evaluated_count
+
+    if reference_count == 0:
+        recall = 0.0
+    else:
+        recall = overlapping_count / reference_count
+
+    f1_score = 2.0 * ((precision * recall) / (precision + recall + 1e-8))
+
+    return f1_score, precision, recall
+
+
+def _f_p_r_lcs(llcs, m, n):
+    r_lcs = llcs / m
+    p_lcs = llcs / n
+    beta = p_lcs / (r_lcs + 1e-12)
+    num = (1 + (beta ** 2)) * r_lcs * p_lcs
+    denom = r_lcs + ((beta ** 2) * p_lcs)
+    f_lcs = num / (denom + 1e-12)
+    return f_lcs, p_lcs, r_lcs
+
+
+def rouge_l_sentence_level(evaluated_sentences, reference_sentences):
+    if len(evaluated_sentences) <= 0 or len(reference_sentences) <= 0:
+        raise ValueError("Collections must contain at least 1 sentence.")
+    reference_words = _split_into_words(reference_sentences)
+    evaluated_words = _split_into_words(evaluated_sentences)
+    m = len(reference_words)
+    n = len(evaluated_words)
+    lcs = _len_lcs(evaluated_words, reference_words)
+    return _f_p_r_lcs(lcs, m, n)
+
+
+def _union_lcs(evaluated_sentences, reference_sentence):
+    if len(evaluated_sentences) <= 0:
+        raise ValueError("Collections must contain at least 1 sentence.")
+
+    lcs_union = set()
+    reference_words = _split_into_words([reference_sentence])
+    combined_lcs_length = 0
+    for eval_s in evaluated_sentences:
+        evaluated_words = _split_into_words([eval_s])
+        lcs = set(_recon_lcs(reference_words, evaluated_words))
+        combined_lcs_length += len(lcs)
+        lcs_union = lcs_union.union(lcs)
+
+    union_lcs_count = len(lcs_union)
+    union_lcs_value = union_lcs_count / combined_lcs_length
+    return union_lcs_value
+
+
+def rouge_l_summary_level(evaluated_sentences, reference_sentences):
+    if len(evaluated_sentences) <= 0 or len(reference_sentences) <= 0:
+        raise ValueError("Collections must contain at least 1 sentence.")
+
+    m = len(_split_into_words(reference_sentences))
+
+    n = len(_split_into_words(evaluated_sentences))
+
+    union_lcs_sum_across_all_references = 0
+    for ref_s in reference_sentences:
+        union_lcs_sum_across_all_references += _union_lcs(evaluated_sentences,
+                                                          ref_s)
+    return _f_p_r_lcs(union_lcs_sum_across_all_references, m, n)
+
+
+def rouge(hypotheses, references):
+    # hyps_and_refs = zip(hypotheses, references)
+    # hyps_and_refs = [_ for _ in hyps_and_refs if len(_[0]) > 0]
+    # hypotheses, references = zip(*hyps_and_refs)
+
+    rouge_1 = [
+        rouge_n([hyp], [ref], 1) for hyp, ref in zip(hypotheses, references)
+    ]
+    rouge_1_f, rouge_1_p, rouge_1_r = map(np.mean, zip(*rouge_1))
+
+    rouge_2 = [
+        rouge_n([hyp], [ref], 2) for hyp, ref in zip(hypotheses, references)
+    ]
+    rouge_2_f, rouge_2_p, rouge_2_r = map(np.mean, zip(*rouge_2))
+
+    rouge_l = [
+        rouge_l_sentence_level([hyp], [ref])
+        for hyp, ref in zip(hypotheses, references)
+    ]
+    rouge_l_f, rouge_l_p, rouge_l_r = map(np.mean, zip(*rouge_l))
+
+    return rouge_1_f, rouge_1_r, rouge_1_p, rouge_2_f, rouge_2_r, rouge_2_p, rouge_l_f, rouge_l_r, rouge_l_p
+
+
+rouge_1_f = 0
+rouge_1_r = 0
+rouge_1_p = 0
+rouge_2_f = 0
+rouge_2_r = 0
+rouge_2_p = 0
+rouge_l_f = 0
+rouge_l_r = 0
+rouge_l_p = 0
+rouge_1_f_tmp = 0
+rouge_1_r_tmp = 0
+rouge_1_p_tmp = 0
+rouge_2_f_tmp = 0
+rouge_2_r_tmp = 0
+rouge_2_p_tmp = 0
+rouge_l_f_tmp = 0
+rouge_l_r_tmp = 0
+rouge_l_p_tmp = 0
+
+count = 0
+for summarization in sorted_summaries_short:
+    rouge_1_f_tmp, rouge_1_r_tmp, rouge_1_p_tmp, rouge_2_f_tmp, rouge_2_r_tmp, rouge_2_p_tmp, rouge_l_f_tmp, rouge_l_r_tmp, rouge_l_p_tmp = rouge(
+        output_predict[count], summarization)
+    count += 1
+    rouge_1_f += rouge_1_f_tmp
+    rouge_1_r += rouge_1_r_tmp
+    rouge_1_p += rouge_1_p_tmp
+    rouge_2_f += rouge_2_f_tmp
+    rouge_2_r += rouge_2_r_tmp
+    rouge_2_p += rouge_2_p_tmp
+    rouge_l_f += rouge_l_f_tmp
+    rouge_l_r += rouge_l_r_tmp
+    rouge_l_p += rouge_l_p_tmp
+
+rouge_1_f = rouge_1_f / count
+rouge_1_r = rouge_1_r / count
+rouge_1_p = rouge_1_p / count
+rouge_2_f = rouge_2_f / count
+rouge_2_r = rouge_2_r / count
+rouge_2_p = rouge_2_p / count
+rouge_l_f = rouge_l_f / count
+rouge_l_r = rouge_l_r / count
+rouge_l_p = rouge_l_p / count
+
+print('ROUGE: ')
+print()
+print('   ROUGE-1:')
+print('      ROUGE-1/Precision:   {}'.format(rouge_1_p))
+print('      ROUGE-1/Recall:      {}'.format(rouge_1_r))
+print('      ROUGE-1/F1-Score:    {}'.format(rouge_1_f))
+print()
+print('   ROUGE-2:')
+print('      ROUGE-2/Precision:   {}'.format(rouge_2_p))
+print('      ROUGE-2/Recall:      {}'.format(rouge_2_r))
+print('      ROUGE-2/F1-Score:    {}'.format(rouge_2_f))
+print()
+print('   ROUGE-L:')
+print('      ROUGE-L/Precision:   {}'.format(rouge_l_p))
+print('      ROUGE-L/Recall:      {}'.format(rouge_l_r))
+print('      ROUGE-L/F1-Score:    {}'.format(rouge_l_f))
+
+print('Example summarizer do: ')
+for i in range(5):
+    print('Example #{}'.format(i + 1))
+    print('Predict: {}'.format(output_predict[i]))
+    print()
+    print('References: {}'.format(sorted_summaries_short[i]))
+    print()
+    print('Texts: {}'.format(sorted_texts_short[i]))
+
+print()
+print('The program has ended')
